@@ -1,0 +1,168 @@
+import numpy as np
+import cv2
+import math
+import itertools
+
+def get_centroid(mask):
+    """
+    이진 마스크의 모멘트를 계산하여 기하학적 중심점(Centroid)을 반환합니다.
+    Coverage 알고리즘이 실패했을 때 해당 노드의 대표 지점으로 활용됩니다.
+    """
+    if mask is None or cv2.countNonZero(mask) == 0:
+        return None
+        
+    M = cv2.moments(mask)
+    if M["m00"] != 0:
+        cX = int(M["m10"] / M["m00"])
+        cY = int(M["m01"] / M["m00"])
+        return (cX, cY)
+    return None
+
+def euclidean_distance(p1, p2):
+    """
+    두 점 사이의 유클리디안 거리를 계산합니다. $d = \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}$
+    """
+    return math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+
+def get_distance_matrix(points):
+    """
+    점들의 리스트를 받아 TSP 알고리즘에 필요한 거리 행렬(Distance Matrix)을 생성합니다.
+    """
+    n = len(points)
+    matrix = np.zeros((n, n))
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist = euclidean_distance(points[i], points[j])
+            matrix[i][j] = matrix[j][i] = dist
+    return matrix
+
+def get_nearest_point(target_pt, points_list):
+    """
+    기준점(target_pt)에서 가장 가까운 점을 리스트(points_list)에서 찾아 반환합니다.
+    Transit 경로의 시작점과 Coverage 경로의 끝점을 연결할 때 사용됩니다.
+    """
+    if not points_list:
+        return None
+    
+    # 람다 식을 이용한 최소 거리 탐색
+    nearest = min(points_list, key=lambda p: euclidean_distance(target_pt, p))
+    return nearest
+
+def pixel_to_meter(px_coord, origin, resolution, map_height):
+    """
+    이미지 픽셀 좌표를 실제 지도 상의 미터(m) 좌표로 정확히 역변환합니다 (Y축 반전 보정).
+    """
+    mx = origin[0] + px_coord[0] * resolution
+    # OpenCV Y축 인덱스를 ROS 2 물리 Y 좌표로 역산
+    my = origin[1] + (map_height - 1 - px_coord[1]) * resolution
+    return (mx, my)
+
+def meter_to_pixel(m_coord, origin, resolution, map_height):
+    """
+    실제 미터(m) 좌표를 이미지 픽셀 좌표로 정확히 변환합니다 (Y축 반전 반영).
+    """
+    px = int((m_coord[0] - origin[0]) / resolution)
+    # ROS 2 물리 Y 좌표를 OpenCV Y축 인덱스로 변환
+    py = int(map_height - 1 - ((m_coord[1] - origin[1]) / resolution))
+    return (px, py)
+
+def estimate_min_width_px(mask):
+    """safe_node_mask(마진 적용 후)의 최소 폭을 minAreaRect로 근사."""
+    if mask is None or cv2.countNonZero(mask) == 0:
+        return 0.0
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 0.0
+    c = max(contours, key=cv2.contourArea)
+    (_, _), (w, h), _ = cv2.minAreaRect(c)
+    return float(min(w, h))
+
+def get_long_axis_angle_rad(mask):
+    """
+    mask를 감싸는 minAreaRect의 긴 변 방향을 라디안으로 반환한다.
+    narrow/ultra_narrow 노드에서 F2C 스와스 방향을 이 각도로 강제 지정하는 데 쓴다.
+
+    주의: cv2.minAreaRect의 angle 규약이 OpenCV 버전마다 다르다(4.5 이전과
+    이후가 다름). 적용 전에 방향을 아는 노드 하나로 실제 결과를 시각화해서
+    눈으로 확인할 것 - 90도 어긋나면 오히려 짧은 축 방향이 강제되어 역효과가 난다.
+    """
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return 0.0
+    c = max(contours, key=cv2.contourArea)
+    (_, _), (w, h), angle = cv2.minAreaRect(c)
+    if w < h:
+        angle += 90.0
+    return math.radians(angle)
+    
+def merge_short_runs(runs, min_len_px=15):
+    """
+    _split_by_assist_mask 등으로 나뉜 (flag, path) run 목록에서, 실제 길이(호 길이)가
+    min_len_px보다 짧은 run을 직전 run에 흡수시킨다. assist_mask 경계가 픽셀 단위로
+    삐뚤빼뚤해서 생기는 미세한 on/off 토글(예: 1~2점짜리 sub-segment)을 제거하기 위함.
+
+    Args:
+        runs (list): [(flag, [(x,y), ...]), ...] 형태의 리스트
+        min_len_px (float): 이 값보다 짧은 run은 직전 run에 흡수됨
+
+    Returns:
+        list: 병합된 (flag, path) 리스트
+    """
+    if not runs:
+        return runs
+
+    merged = [list(runs[0])]
+    for flag, run in runs[1:]:
+        run_len = sum(
+            math.hypot(run[k + 1][0] - run[k][0], run[k + 1][1] - run[k][1])
+            for k in range(len(run) - 1)
+        )
+        if run_len < min_len_px and merged:
+            prev_flag, prev_run = merged[-1]
+            merged[-1] = [prev_flag, prev_run + run[1:]]
+        else:
+            merged.append([flag, run])
+
+    return [(f, r) for f, r in merged]
+
+def order_swaths_optimally(swath_pairs, entry_hint, exit_hint):
+    """
+    entry_hint(진입 문지방)에서 시작해 모든 스와스를 방문하고 exit_hint(진출
+    문지방)에서 끝나는 총 이동거리가 최소가 되도록, 스와스 순서와 각
+    스와스의 방향을 정확히 최적화한다(순열 x 방향 조합 완전탐색).
+
+    노드당 스와스 개수가 보통 1~3개 수준이라 완전탐색으로 충분하다. 만약
+    유난히 큰 노드가 있어 스와스가 많아지면(n>8) 조합이 급격히 커지므로
+    임시로 원래 순서를 반환한다 - 실제로 이런 노드가 있는지는 로그로
+    확인 후 필요시 그리디 방식으로 대체해야 한다.
+    """
+    n = len(swath_pairs)
+    if n == 0:
+        return []
+    if entry_hint is None:
+        entry_hint = swath_pairs[0][0]
+    if exit_hint is None:
+        exit_hint = swath_pairs[-1][1]
+
+    if n > 8:
+        print(f"[WARN] order_swaths_optimally: n={n}개 스와스는 완전탐색에 부적합. "
+              f"원래 순서를 그대로 사용합니다.")
+        return swath_pairs
+
+    best_order, best_cost = None, float('inf')
+    for perm in itertools.permutations(range(n)):
+        for flips in itertools.product([False, True], repeat=n):
+            pts = [((p2, p1) if flip else (p1, p2))
+                   for idx, flip in zip(perm, flips)
+                   for p1, p2 in [swath_pairs[idx]]]
+
+            cost = euclidean_distance(entry_hint, pts[0][0])
+            for k in range(n - 1):
+                cost += euclidean_distance(pts[k][1], pts[k + 1][0])
+            cost += euclidean_distance(pts[-1][1], exit_hint)
+
+            if cost < best_cost:
+                best_cost = cost
+                best_order = pts
+
+    return best_order

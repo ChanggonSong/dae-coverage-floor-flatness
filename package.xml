@@ -1,0 +1,36 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>dae_coverage_floor_flatness</name>
+  <version>0.1.0</version>
+  <description>DAE 기반 실내 환경 모델링과 커버리지 주행을 이용한 3D LiDAR 바닥 평탄도 자율 측정 시스템</description>
+  <maintainer email="gon05158557@gmail.com">Changgon</maintainer>
+  <license>Apache-2.0</license>
+
+  <!-- 공용 ROS 2 메시지/통신 -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>sensor_msgs_py</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>tf_transformations</exec_depend>
+
+  <!-- mission_execution: Nav2 주행 제어 (Jetson Orin Nano(turtlebot3 waffle)) -->
+  <exec_depend>nav2_simple_commander</exec_depend>
+  <exec_depend>nav2_msgs</exec_depend>
+
+  <!-- Gazebo Sim Mode teleport (실주행 환경에서는 미설치되어도 무방하도록 코드에서 try/except 처리됨) -->
+  <exec_depend>gazebo_msgs</exec_depend>
+
+  <!-- environment_modeling: DAE/맵 처리 -->
+  <exec_depend>python3-opencv</exec_depend>
+
+  <!-- mission_generation 단계에서 사용 (오프라인, 고성능 PC) -->
+  <exec_depend>laser_filters</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

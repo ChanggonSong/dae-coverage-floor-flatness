@@ -1,0 +1,106 @@
+# config/params.yaml
+
+global:
+  # 패키지 외부의 데이터 저장소 경로. 홈 디렉토리에 있음.
+  workspace_root: "~/dae_floor_maps"
+
+# ==============================================================================
+# [1. Mission Generation - Environment Modeling Component]
+# ==============================================================================
+environment_modeling:
+  # [Global Settings]
+  target_resolution: 0.02 # 맵의 해상도 (meter/pixel). 값이 작을수록 정밀하지만 계산량이 증가.
+  dae_file: "Apt.dae" # 분석 대상 3D 모델 파일명. INU_9_211.dae, Apt.dae
+
+  # [Strict Directory Mappings]
+  input_dir: "assets"
+  output_grid_dir: "maps/grid"           # 2D OGM (.yaml, .pgm) 저장 경로
+  output_topology_dir: "maps/topology"   # 공간 분할 Topological Graph (.npz) 저장 경로
+  visualization_dir: "visualization/mission_generation/environment_modeling" # 디버깅 이미지
+  
+  # [Robot & Environment Constraints]
+  robot_width: 0.14 # (m) 로봇 반경.(벽)
+  lidar_mount_height: 0.338 # (m) base_footprint(지면) 기준 velodyne_link 높이. 실측하여 정확한 값을 기입바람.
+  lidar_vertical_fov_deg: 15.0 # 수직 FOV 절반
+  path_safety_margin: 0.25
+  max_door_radius: 0.5 # 일반적인 방의 문 폭의 최대 너비의 절반: 1.0 / 2 = 0.5 (m)
+  min_area_px: 100 # 분할된 조각이 너무 작아지는 것 방지.
+  max_aspect_ratio: 4 # 공간의 최대 종횡비의 기준. 예를 들어 공간의 종횡비가 5 이상이라면, 지나치게 긴 공간으로 간주하여 분할함.
+
+  # [Recursive Convexity Decomposition]
+  # 공간의 convexity을 기준으로 L자, U자형 공간을 사각형에 가깝게 분할하는 로직
+  convexity: 
+    # 1. 분할 실행 임계값
+    base_solidity_threshold: 0.86   # 기본 분할 기준 (Solidity). 1.0에 가까울수록 엄격하게(더 많이) 분할함.
+    strict_solidity_threshold: 0.75 # 강제 분할 기준. 볼록성이 이 수치 미만이면 병목이 작아도 무조건 분할 시도.
+    l_shape_ratio_threshold: 0.85   # (최소폭 / 평균폭)값이 이 값보다 작으면 L자 코너로 판단.
+    
+    # 2. Projection 분석 파라미터
+    projection_margin_ratio: 0.1    # Projection 분석 시 무시할 양 끝단 비율. 0.1은 양쪽 10%씩 제외하고 중앙 80%에서 절단점 탐색.
+    bottleneck_tolerance_ratio: 1.05 # 병목 구간 인정 오차 범위. 최솟값의 105% 이내 픽셀들을 모두 최적 절단 후보군으로 설정.
+    
+    # 3. 마스크 복원 및 필터링 (Dilation)
+    # 절단된 노드들에 인접한 벽면 데이터를 안전하게 빠집없이 배분히기 위한 설정
+    dilation_kernel_size: 5         # 벽면 탐색을 위한 커널 크기 (pixel). 해상도가 높을수록 키우는 것을 권장.
+    dilation_padding_px: 10         # 노드 확장 시의 추가 여유분 (pixel). 노드 크기의 절반 + 이 값만큼 확장하여 벽면 데이터를 수집함.
+
+# ==============================================================================
+# [2. Mission Generation - Mission Planning Component]
+# ==============================================================================
+mission_planner:
+  lidar_range: 3.0 # 라이다 측정 최대 범위 (m)
+  overlap: 0.2 # 이동하면서 측정 시 오버랩할 비율
+  
+  # [Strict Directory Mappings]
+  output_metric_dir: "analytics/metrics" # 생성된 최종 웨이포인트 (.json) 저장 경로
+  visualization_dir: "visualization/mission_generation/mission_planning"
+
+  turn_weight: 2.0
+  wall_weight: 12.0
+
+# ==============================================================================
+# [3. Mission Execution - Robot Driving & Tracking Component]
+# ==============================================================================
+mission_execution:
+  # [Strict Directory Mappings]
+  input_metric_dir: "analytics/metrics"  # 주행을 위해 읽어올 미션 웨이포인트 (.json) 경로
+  output_path_dir: "analytics/paths"     # 계획 경로 및 실주행 경로 비교 데이터 (.csv) 저장 경로
+  visualization_dir: "visualization/mission_execution"
+
+  post_localization_wait_sec: 3.0
+
+  ignore_initial_seconds: 1.0
+  active_capture_seconds: 2.0
+  min_rotation_deg: 3.0          # 이 이하 각도차는 회전 생략
+  spin_time_allowance_sec: 15.0
+
+  direction_change_threshold_deg: 15.0 # 좁은 구역 측정 문제를 해결하기 위해 coverage/transit 무시함. 전체 경로를 대상으로, 15도 이상 방향이 바뀌는 지점으로 분할.
+
+# ==============================================================================
+# [4. Surface Profiling - 3D Measurement & Evaluation Component]
+# ==============================================================================
+surface_profiling:
+  # [Strict Directory Mappings]
+  pointcloud_dir: "analytics/pointclouds"  # 로우 PCD 및 정렬/필터링된 바닥면 수치 데이터 저장 경로
+  visualization_dir: "visualization/surface_profiling" # 최종 평탄도 히트맵 이미지 (.png) 저장 경로
+  map_yaml_dir: "maps/grid"
+
+  # [ROS2 Topic & TF Settings]
+  pcd_topic_sim: "/velodyne_points"   # Gazebo 시뮬레이션 환경에서의 3D 라이다 토픽
+  pcd_topic_real: "/velodyne_points"  # 실제 Velodyne VLP-16 하드웨어 토픽
+  target_frame: "map"              # TF lookup 목표 좌표계 (전역 좌표계)
+  source_frame: "velodyne_link"    # TF lookup 원본 좌표계 (3D 라이다 센서 좌표계)
+  tf_timeout_sec: 0.5              # TF lookup 허용 대기 시간 (초). Chrony 시간 동기화 정밀도에 의존함.
+
+  only_capture_at_waypoints: true
+  enable_tf_lowpass_filter: true
+  tf_lowpass_max_linear_vel: 0.3       # m/s
+  tf_lowpass_max_angular_vel_deg: 20.0  # deg/s
+
+  # [Point Cloud Processing]
+  voxel_size: 0.01      # (m) PCD 저장 시 다운샘플링 단위. 메모리 초과 방지용.
+  z_min: 0.000         # (m) -0.5cm, 필요에 따라 수정.
+  z_max: 0.035          # (m) 3.5cm, 필요에 따라 수정.
+
+  # [Heatmap Visualization]
+  grid_size: 0.01        # (m) 히트맵 격자 크기. 작을수록 선명하지만 계산량 증가.
