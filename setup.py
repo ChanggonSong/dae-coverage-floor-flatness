@@ -26,7 +26,7 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Changgon',
+    maintainer='ChanggonSong',
     maintainer_email='gon05158557@gmail.com',
     description='DAE 기반 실내 환경 모델링과 커버리지 주행을 이용한 3D LiDAR 바닥 평탄도 자율 측정 시스템',
     license='Apache-2.0',
