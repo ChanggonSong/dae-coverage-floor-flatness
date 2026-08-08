@@ -25,43 +25,81 @@ def mask_to_f2c_cells(mask):
     cells.addGeometry(cell)
     return cells
 
-def generate_raw_swaths(mask, robot_params, forced_angle_rad=None):
+def generate_raw_swaths(mask, robot_params, decompose=False, split_angle_rad=None):
     """
-    F2C의 route planner(RP_Boustrophedon/RP_CustomOrder)는 쓰지 않는다.
-    필요한 건 SG_BruteForce가 뽑은 스와스들의 (시작점, 끝점) 좌표뿐이고,
-    스와스 간 순서/방향 최적화는 mission_planner.py가 진입/진출 문지방
-    정보를 갖고 직접 담당한다 - F2C route planner는 현재 프로젝트에서는 필요없는
-    턴 경로 삽입까지 포함된 기능이라 이 프로젝트엔 과함.
+    decompose=True면, mask 폴리곤을 문지방 경계마다 볼록 조각으로 분할
+    (Boustrophedon Decomposition)한 뒤, 가장 큰 조각(본체)만 골라 로봇의
+    실제 물리 폭(width_px) 기준으로 중심선 스와스 1개를 생성한다.
 
-    Returns:
-        list[tuple]: [(start_pt, end_pt), ...] 스와스별 (시작, 끝) 픽셀 좌표.
-        빈 리스트면 실패(호출부가 centroid 폴백으로 처리).
+    문지방 돌출부(작은 조각들)는 F2C에 넘기지 않는다 - Leg2(문지방 중심점 ->
+    coverage 시작점)가 이미 record_pcd=True로 그 위를 지나가므로 F2C가 별도로
+    커버할 필요가 없다(검증: node_002 사례에서 이미 확인됨).
+
+    기존 swath_width_px(라이다 측정반경 기반) 방식은 wide 노드 및
+    decompose=False일 때 그대로 유지한다 - 그 용도(넓은 방에서 평행선 간격)엔
+    원래도 맞는 값이었다.
     """
     f2c_cells = mask_to_f2c_cells(mask)
     if f2c_cells is None:
         return []
 
-    robot = f2c.Robot(robot_params['swath_width_px'], robot_params['swath_width_px'])
+    if decompose:
+        decomp = f2c.DECOMP_Boustrophedon()
+        decomp.setSplitAngle(split_angle_rad if split_angle_rad is not None else 0.0)
+        decomp_cells = decomp.decompose(f2c_cells)
+
+        const_hl = f2c.HG_Const_gen()
+        decomp_cells = const_hl.generateHeadlands(decomp_cells, 0.0)
+
+        if decomp_cells.size() == 0:
+            return []
+
+        areas = [decomp_cells.getGeometry(i).area() for i in range(decomp_cells.size())]
+        big_idx = areas.index(max(areas))
+
+        main_body_cells = f2c.Cells()
+        main_body_cells.addGeometry(decomp_cells.getGeometry(big_idx))
+
+        op_width = robot_params['width_px']
+        target_cells = main_body_cells
+    else:
+        op_width = robot_params['swath_width_px']
+        target_cells = f2c_cells
+
+    robot = f2c.Robot(op_width, op_width)
     swath_gen = f2c.SG_BruteForce()
-    if forced_angle_rad is not None:
-        raw_swaths_by_cells = swath_gen.generateSwaths(forced_angle_rad, robot.getWidth(), f2c_cells)
+
+    if split_angle_rad is not None and decompose:
+        raw_swaths_by_cells = swath_gen.generateSwaths(split_angle_rad, robot.getWidth(), target_cells)
     else:
         swath_gen.setStepAngle(math.pi / 36.0)
         obj = f2c.OBJ_SwathLength()
-        raw_swaths_by_cells = swath_gen.generateBestSwaths(obj, robot.getWidth(), f2c_cells)
-
-    try: actual_swaths = raw_swaths_by_cells[0]
-    except Exception:
-        try: actual_swaths = raw_swaths_by_cells.at(0)
-        except Exception: return []
+        raw_swaths_by_cells = swath_gen.generateBestSwaths(obj, robot.getWidth(), target_cells)
 
     swath_pairs = []
-    for i in range(actual_swaths.size()):
-        try: sw = actual_swaths[i]
-        except Exception: sw = actual_swaths.at(i)
-        p1 = (int(sw.startPoint().getX()), int(sw.startPoint().getY()))
-        p2 = (int(sw.endPoint().getX()), int(sw.endPoint().getY()))
-        swath_pairs.append((p1, p2))
+    n_cells = target_cells.size()
+    for cell_idx in range(n_cells):
+        try: cell_swaths = raw_swaths_by_cells[cell_idx]
+        except Exception:
+            try: cell_swaths = raw_swaths_by_cells.at(cell_idx)
+            except Exception: continue
+
+        n_swaths = cell_swaths.size()
+        if n_swaths == 0:
+            continue
+
+        # [핵심] decompose 모드에서는 여러 줄(narrow 폭 대비 촘촘한 간격) 중
+        # 가운데 하나만 골라 왕복 없이 중심선 하나로 지나간다 - 이동하면서
+        # 사각지대가 메워진다는 전제(assist_mask/capture_tail 로직)와 일관됨.
+        indices_to_use = [n_swaths // 2] if decompose else range(n_swaths)
+
+        for i in indices_to_use:
+            try: sw = cell_swaths[i]
+            except Exception: sw = cell_swaths.at(i)
+            p1 = (int(sw.startPoint().getX()), int(sw.startPoint().getY()))
+            p2 = (int(sw.endPoint().getX()), int(sw.endPoint().getY()))
+            swath_pairs.append((p1, p2))
+
     return swath_pairs
 
 def generate_swath_path(mask, robot_params):

@@ -1,7 +1,6 @@
 import numpy as np
 import cv2
 import math
-import itertools
 
 def get_centroid(mask):
     """
@@ -125,44 +124,43 @@ def merge_short_runs(runs, min_len_px=15):
 
     return [(f, r) for f, r in merged]
 
-def order_swaths_optimally(swath_pairs, entry_hint, exit_hint):
+def order_swaths_by_entry(swath_pairs, entry_hint):
     """
-    entry_hint(진입 문지방)에서 시작해 모든 스와스를 방문하고 exit_hint(진출
-    문지방)에서 끝나는 총 이동거리가 최소가 되도록, 스와스 순서와 각
-    스와스의 방향을 정확히 최적화한다(순열 x 방향 조합 완전탐색).
-
-    노드당 스와스 개수가 보통 1~3개 수준이라 완전탐색으로 충분하다. 만약
-    유난히 큰 노드가 있어 스와스가 많아지면(n>8) 조합이 급격히 커지므로
-    임시로 원래 순서를 반환한다 - 실제로 이런 노드가 있는지는 로그로
-    확인 후 필요시 그리디 방식으로 대체해야 한다.
+    entry_hint에서 가장 가까운 스와스/끝점부터 출발해, 매번 남은 스와스 중
+    현재 위치에서 가장 가까운 끝점을 갖는 스와스를 다음으로 고르는
+    nearest-neighbor 체이닝. exit_hint는 고려하지 않는다 - 진입 후 최대한
+    빨리 커버리지를 시작하는 것이 목표이고, 노드 진출 방향은 신경 쓰지 않기로
+    했기 때문이다(왕복 방식으로 narrow/ultra_narrow의 blind zone을 커버하는
+    전략과 일관됨).
     """
     n = len(swath_pairs)
     if n == 0:
         return []
-    if entry_hint is None:
-        entry_hint = swath_pairs[0][0]
-    if exit_hint is None:
-        exit_hint = swath_pairs[-1][1]
 
-    if n > 8:
-        print(f"[WARN] order_swaths_optimally: n={n}개 스와스는 완전탐색에 부적합. "
-              f"원래 순서를 그대로 사용합니다.")
-        return swath_pairs
+    remaining = list(range(n))
 
-    best_order, best_cost = None, float('inf')
-    for perm in itertools.permutations(range(n)):
-        for flips in itertools.product([False, True], repeat=n):
-            pts = [((p2, p1) if flip else (p1, p2))
-                   for idx, flip in zip(perm, flips)
-                   for p1, p2 in [swath_pairs[idx]]]
+    def pick_nearest(ref_pt):
+        best_i, best_flip, best_d = None, False, float('inf')
+        for idx in remaining:
+            p1, p2 = swath_pairs[idx]
+            d1 = euclidean_distance(ref_pt, p1)
+            d2 = euclidean_distance(ref_pt, p2)
+            if d1 < best_d:
+                best_i, best_flip, best_d = idx, False, d1
+            if d2 < best_d:
+                best_i, best_flip, best_d = idx, True, d2
+        return best_i, best_flip
 
-            cost = euclidean_distance(entry_hint, pts[0][0])
-            for k in range(n - 1):
-                cost += euclidean_distance(pts[k][1], pts[k + 1][0])
-            cost += euclidean_distance(pts[-1][1], exit_hint)
+    ordered = []
+    ref = entry_hint if entry_hint is not None else swath_pairs[0][0]
 
-            if cost < best_cost:
-                best_cost = cost
-                best_order = pts
+    while remaining:
+        idx, flip = pick_nearest(ref)
+        p1, p2 = swath_pairs[idx]
+        if flip:
+            p1, p2 = p2, p1
+        ordered.append((p1, p2))
+        remaining.remove(idx)
+        ref = p2
 
-    return best_order
+    return ordered

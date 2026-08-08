@@ -41,17 +41,24 @@ class MissionExecutor(Node):
     주행 방식: final_path.json 전체를 방향(heading)이 바뀌는 지점 기준으로만
     재분할한다(_split_into_straight_subsegments). coverage/transit 구분 없이
     모든 직선 sub-segment에서 동일하게 처리한다 (_execute_capture_subsegment):
-      제자리 회전(Spin, 절대각 차이 기반) -> 1초 정착 대기 -> surface_profiler에
-      캡처 시작 신호 -> 구간 끝점까지 직선 주행(NavigateToPose)하며 계속 캡처 ->
-      도착 시 자동 정지 -> 캡처 종료 신호.
-    회전/정착 중에는 캡처하지 않고 오직 등속 직선 구간에서만 캡처한다(회전 시
-    AMCL 오차가 가장 크기 때문). 실측 결과 coverage뿐 아니라 transit 구간도
-    연속으로 측정해야 라이다 blind zone이 충분히 메꿔지는 것으로 확인되어,
-    coverage/transit을 다르게 처리하던 이전 방식(FollowWaypoints 전용 transit)을
-    폐기하고 이 통합 방식으로 전환하였다.
-    각 sub-segment는 별도 goal로 순차 전송되므로, 미션 전체의 성공/실패는
-    self.mission_succeeded 플래그로 별도 추적한다(navigator.getResult()는
-    마지막으로 전송된 goal 하나의 결과만 반영하기 때문).
+    제자리 회전(Spin, 절대각 차이 기반) -> (캡처가 아직 꺼져 있을 때만) 1초
+    정착 대기 후 surface_profiler에 캡처 시작 신호 -> 구간 끝점까지 여러 점을
+    한 번에 통과하는 직선 주행(NavigateThroughPoses/goThroughPoses)하며 계속
+    캡처 -> 도착 시 정지.
+
+    캡처 종료는 더 이상 매 sub-segment 끝에서 즉시 일어나지 않는다. record_pcd=
+    True인 구간이 끝나도, 그 지점을 실제로 지나쳐서 멀어져야 얕은 각도에서 라이다
+    blind zone이 메워지므로, 이후 최대 capture_tail_sec초 동안 다음 sub-segment
+    (들)로 캡처 상태를 이어간 뒤에야 끈다(self._capture_active/
+    self._capture_tail_deadline). 이 '꼬리' 구간에서는 회전 중에도 캡처를 끊지
+    않는다(끊었다 다시 켜면 창이 갈라지므로) - "회전 중엔 AMCL 오차가 커서 캡처
+    안 함" 원칙은 각 sub-segment의 '주된'(record_pcd=True로 새로 시작하는) 캡처
+    구간에는 여전히 적용되고, 꼬리 구간에서만 예외로 완화된다.
+
+    실측 결과 coverage뿐 아니라 transit 구간도 연속으로 측정해야 라이다 blind
+    zone이 충분히 메꿔지는 것으로 확인되어, coverage/transit을 다르게 처리하던
+    이전 방식(FollowWaypoints 전용 transit)을 폐기하고 이 통합 방식으로
+    전환하였다.
     """
 
     def __init__(self):
@@ -83,6 +90,13 @@ class MissionExecutor(Node):
         # 미션 전체의 성공 여부는 navigator.getResult()(마지막 세그먼트만 반영)가 아닌
         # 이 플래그로 별도 추적한다.
         self.mission_succeeded = False
+
+        # 캡처 연속성 관리: record_pcd=True 구간이 끝나도 즉시 끄지 않고, 그 지점을
+        # 지나쳐서 계속 이동하는 동안(꼬리, tail)은 다음 sub-segment로 캡처 상태를
+        # 이어간다 - "그 지점을 지나쳐서 멀어져야" 얕은 각도로 blind zone이
+        # 메워지는데, 구간 끝에서 캡처를 바로 끊으면 그 기회 자체가 사라지기 때문.
+        self._capture_active = False
+        self._capture_tail_deadline = 0.0
 
         # 주행 모니터링 관련 상태
         self.current_amcl_x = None
@@ -429,8 +443,11 @@ class MissionExecutor(Node):
             캡처 시작 -> 구간 끝점까지 직선 주행하며 계속 캡처 -> 도착 시
             자동 정지 -> 캡처 종료(그동안 모은 포인트 취합).
 
-        회전/정착 중에는 절대 캡처하지 않고 오직 등속 직선 구간에서만 캡처한다
-        (회전 시 AMCL 오차가 가장 크기 때문). 구간 경계는 각 웨이포인트에 이미
+        각 sub-segment가 새로 record_pcd=True로 캡처를 시작할 때는, 회전/정착
+        중엔 캡처하지 않고 오직 등속 직선 구간에서만 캡처한다(회전 시 AMCL
+        오차가 가장 크기 때문). 다만 직전 구간의 '꼬리'(capture_tail_sec)가
+        아직 진행 중인 채로 넘어온 sub-segment는 이 원칙의 예외로, 회전
+        구간에서도 캡처가 끊기지 않는다(_execute_capture_subsegment 참고). 구간 경계는 각 웨이포인트에 이미
         기록된 orientation(translator.py가 진행방향 기준으로 계산해둔 값)을
         연속 비교해서 찾는다 — direction_change_threshold_deg를 넘는 지점마다
         새 구간 시작. 원래 coverage 세그먼트 하나(F2C 스와스)는 태생적으로
@@ -477,6 +494,10 @@ class MissionExecutor(Node):
                 print(f"[-] Sub-segment {seg_idx + 1} failed. Aborting mission.")
                 self.mission_succeeded = False
                 break
+
+        if self._capture_active:
+            self._call_capture_service(self.stop_capture_client, "stop_waypoint_capture")
+            self._capture_active = False
 
         if self.sub_amcl_check is not None:
             self.destroy_subscription(self.sub_amcl_check)
@@ -602,45 +623,48 @@ class MissionExecutor(Node):
         return is_emergency
 
     # ------------------------------------------------------------------
-    # 직선 sub-segment 실행 (회전 -> 정착 -> 캡처 시작 -> 직선 주행+캡처 -> 정지 -> 캡처 종료)
-    # coverage/transit 구분 없이 모든 직선 구간에 동일하게 적용된다.
+    # 직선 sub-segment 실행 (회전 -> [필요시] 캡처 시작 -> 직선 주행+캡처 ->
+    # [tail_deadline 전이면 유지, 지났으면] 캡처 종료). coverage/transit
+    # 구분 없이 모든 직선 구간에 동일하게 적용된다.
     # ------------------------------------------------------------------
 
     def _execute_capture_subsegment(self, seg_poses, record_pcd=True, is_genuine_single=True):
         settle_sec = self.mission_exec_cfg.get('ignore_initial_seconds', 1.0)
         capture_sec_single = self.mission_exec_cfg.get('active_capture_seconds', 2.0)
+        capture_tail_sec = self.mission_exec_cfg.get('capture_tail_sec', 2.0)
         end_pose = seg_poses[-1]
         is_single_point = (len(seg_poses) == 1)
 
-        # 1. 제자리 회전
+        # 1. 제자리 회전 (기존과 동일, 손대지 않음)
         if is_single_point and not is_genuine_single:
-            # 마지막 세그먼트처럼 합칠 대상이
-            # 없는 잔여 케이스에 대한 안전망 - "이미 도착했다"고 가정하지 않고
-            # 실제로 그 지점까지 주행한다.
             if not self._navigate_to_pose_blocking(seg_poses[0]):
                 print("[!] Warning: failed to reach isolated corner point. Proceeding anyway.")
         elif not is_single_point:
-            if not self._rotate_in_place_to(end_pose):   # seg_poses[0] -> end_pose
+            if not self._rotate_in_place_to(end_pose):
                 print("[!] Warning: In-place rotation failed or skipped. Proceeding anyway.")
-        # (is_single_point and is_genuine_single인 경우 - 기존 그대로, 회전/이동 없이 캡처만)
-
 
         # 2. 캡처 시작 신호
-        started = False
-        if record_pcd:
+        #    이미 이전 sub-segment의 꼬리로 캡처가 켜져 있으면 재시작(서비스 재호출,
+        #    settle 재대기)하지 않고 그대로 이어간다 - 캡처 창이 끊기지 않아야
+        #    "지나쳐서 멀어지는" 시점의 얕은 각도 포인트가 계속 같은 창에 쌓인다.
+        need_capture = record_pcd or self._capture_active
+        started = self._capture_active
+
+        if need_capture and not self._capture_active:
             self._spin_sleep(settle_sec)
             started = self._call_capture_service(self.start_capture_client, "start_waypoint_capture")
             if not started:
                 print("[!] Skipping this sub-segment's capture window (start signal failed). "
-                    "Still performing the drive so the mission continues.")
-        else:
-            print("  [Capture] record_pcd=False — already covered elsewhere, skipping capture, driving through.")
+                      "Still performing the drive so the mission continues.")
+            self._capture_active = started
+        elif not need_capture:
+            print("  [Capture] record_pcd=False and no pending tail — skipping capture, driving through.")
 
-        # 3. 주행
+        # 3. 주행 (기존과 동일, 손대지 않음)
         ok = True
         if not is_single_point:
             print(f"  [Drive] Straight sub-segment: {len(seg_poses)} points "
-                f"({'continuous capture' if record_pcd else 'no capture'} while moving).")
+                  f"({'continuous capture' if self._capture_active else 'no capture'} while moving).")
             ok = self._navigate_through_poses_blocking(seg_poses)
         elif started:
             print("  [Drive] Single-point sub-segment: staying in place for capture.")
@@ -650,9 +674,17 @@ class MissionExecutor(Node):
         else:
             print("  [Drive] Single-point sub-segment: record_pcd=False, skipping dwell entirely.")
 
-        if started:
-            self._call_capture_service(self.stop_capture_client, "stop_waypoint_capture")
-
+        # 4. 캡처 종료 여부 결정
+        #    - 이번 sub-segment 자체가 record_pcd=True였다면: 지금 끄지 않는다.
+        #      tail_deadline을 새로 갱신하고 다음 sub-segment로 넘긴다.
+        #    - record_pcd=False인데 꼬리가 진행 중이었다면: 마감 시간이 지났는지
+        #      확인해서, 지났으면 지금 끄고, 안 지났으면 계속 다음으로 넘긴다.
+        if self._capture_active:
+            if record_pcd:
+                self._capture_tail_deadline = time.time() + capture_tail_sec
+            elif time.time() >= self._capture_tail_deadline:
+                self._call_capture_service(self.stop_capture_client, "stop_waypoint_capture")
+                self._capture_active = False
 
         return ok
 

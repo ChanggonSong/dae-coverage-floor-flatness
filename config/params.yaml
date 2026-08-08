@@ -25,7 +25,7 @@ environment_modeling:
   path_safety_margin: 0.25
   max_door_radius: 0.5 # 일반적인 방의 문 폭의 최대 너비의 절반: 1.0 / 2 = 0.5 (m)
   min_area_px: 100 # 분할된 조각이 너무 작아지는 것 방지.
-  max_aspect_ratio: 4 # 공간의 최대 종횡비의 기준. 예를 들어 공간의 종횡비가 5 이상이라면, 지나치게 긴 공간으로 간주하여 분할함.
+  max_aspect_ratio: 8 # 공간의 최대 종횡비의 기준. 예를 들어 공간의 종횡비가 5 이상이라면, 지나치게 긴 공간으로 간주하여 분할함.
 
   # [Recursive Convexity Decomposition]
   # 공간의 convexity을 기준으로 L자, U자형 공간을 사각형에 가깝게 분할하는 로직
@@ -73,6 +73,7 @@ mission_execution:
   active_capture_seconds: 2.0
   min_rotation_deg: 3.0          # 이 이하 각도차는 회전 생략
   spin_time_allowance_sec: 15.0
+  capture_tail_sec: 3    # 사각지대 반경만큼 실제로 더 이동하는 데 걸리는 시간 (대략 blind_radius_m / 로봇 평균 선속도)
 
   direction_change_threshold_deg: 15.0 # 좁은 구역 측정 문제를 해결하기 위해 coverage/transit 무시함. 전체 경로를 대상으로, 15도 이상 방향이 바뀌는 지점으로 분할.
 

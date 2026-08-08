@@ -190,6 +190,13 @@ class MissionPlanner:
 
             node_id = self.nodes[node_idx]['id']
             contours, _ = cv2.findContours(safe_node_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+            if node_id == 2:
+                print(f"[DEBUG] Node {node_id}의 safe_node_mask 윤곽선 개수: {len(contours)}")
+                if len(contours) > 1:
+                    areas = [cv2.contourArea(c) for c in contours]
+                    print(f"[DEBUG] 각 조각의 면적: {areas}")
+
             if contours:
                 c = max(contours, key=cv2.contourArea)
                 rect = cv2.minAreaRect(c)
@@ -353,19 +360,32 @@ class MissionPlanner:
 
                 if bucket in ('narrow', 'ultra_narrow'):
                     forced_angle = geometry.get_long_axis_angle_rad(safe_node_mask)
-                    swath_pairs = coverage.generate_raw_swaths(safe_node_mask, self.robot_params, forced_angle_rad=forced_angle)
+                    swath_pairs = coverage.generate_raw_swaths(safe_node_mask, self.robot_params, decompose=True, split_angle_rad=forced_angle)
                 else:
                     swath_pairs = coverage.generate_raw_swaths(safe_node_mask, self.robot_params)
+
+                if self.nodes[curr_node]['id'] == 2:
+                    print(f"[DEBUG] Node 2: forced_angle_deg={math.degrees(forced_angle):.1f}, "
+                          f"num_swaths={len(swath_pairs)}, swath_pairs={swath_pairs}")
+
+                    debug_img = cv2.cvtColor(safe_node_mask, cv2.COLOR_GRAY2BGR)
+                    contours, _ = cv2.findContours(safe_node_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(debug_img, contours, -1, (0, 255, 0), 1)  # 초록: 폴리곤 전체
+                    for p1, p2 in swath_pairs:
+                        cv2.line(debug_img, p1, p2, (0, 0, 255), 2)   # 빨강: 실제 생성된 스와스
+                        cv2.circle(debug_img, p1, 4, (255, 0, 0), -1)  # 파랑: 스와스 시작점
+                        cv2.circle(debug_img, p2, 4, (0, 255, 255), -1)  # 노랑: 스와스 끝점
+
+                    dbg_dir = os.path.join(self.visualization_dir, "width_debug")
+                    os.makedirs(dbg_dir, exist_ok=True)
+                    cv2.imwrite(os.path.join(dbg_dir, "node_002_swaths.png"), debug_img)
+                    print(f"[DEBUG] Saved node_002_swaths.png")
 
                 raw_points = []
                 if swath_pairs:
                     ordered_pairs = geometry.order_swaths_by_entry(swath_pairs, entry_hint)
-                    if bucket in ('narrow', 'ultra_narrow') and len(ordered_pairs) == 1:
-                        p1, p2 = ordered_pairs[0]
-                        raw_points.extend([p1, p2, p1])
-                    else:
-                        for p1, p2 in ordered_pairs:
-                            raw_points.extend([p1, p2])
+                    for p1, p2 in ordered_pairs:
+                        raw_points.extend([p1, p2])
                 else:
                     centroid = geometry.get_centroid(self.nodes[curr_node]['driveable_mask'])
                     if centroid: raw_points.append(centroid)
@@ -406,12 +426,13 @@ class MissionPlanner:
                         )
 
                         if leg2:
-                            if enter_path:
-                                for flag, run in _split_by_assist_mask(enter_path, self.assist_mask):
-                                    run = simplify_path(run, epsilon_px=3.0)                          # 추가
-                                    self.path_segments.append({'type': 'transit', 'path': run, 'record_pcd': flag})
+                            if enter_path and enter_path[-1] == leg2[0]:
+                                full_enter_path = enter_path + leg2[1:]
+                            else:
+                                full_enter_path = enter_path + leg2
 
-                            self.path_segments.append({'type': 'transit', 'path': simplify_path(leg2, epsilon_px=3.0), 'record_pcd': True})  # 추가
+                            for flag, run in _split_by_assist_mask(full_enter_path, self.assist_mask):
+                                self.path_segments.append({'type': 'transit', 'path': run, 'record_pcd': flag})
                             transit_count += 1
                         else:
                             print(f"[ERROR] Cannot find safe path to Node {curr_node+1}. Wall detected!")

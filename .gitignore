@@ -1,5 +1,22 @@
+# Python Bytecode & Cache
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+
+# C/C++ Build Outputs (ROS 2)
 build/
 install/
 log/
+
+# OS / Download Artifacts
+.DS_Store
+Thumbs.db
+*:Zone.Identifier
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*~
+mission_generation/mission_planning/decom_test.py

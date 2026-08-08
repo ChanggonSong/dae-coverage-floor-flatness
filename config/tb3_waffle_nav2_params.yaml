@@ -1,0 +1,415 @@
+/**:
+  ros__parameters:
+    use_sim_time: true
+amcl:
+  ros__parameters:
+    alpha1: 0.2
+    alpha2: 0.2
+    alpha3: 0.2
+    alpha4: 0.2
+    alpha5: 0.2
+    base_frame_id: "base_footprint"
+    beam_skip_distance: 0.5
+    beam_skip_error_threshold: 0.9
+    beam_skip_threshold: 0.3
+    do_beamskip: false
+    map_frame: "map"
+    lambda_short: 0.1
+    laser_likelihood_max_dist: 2.0
+    laser_max_range: 100.0
+    laser_min_range: 0.14
+    laser_model_type: "likelihood_field"
+    max_beams: 180
+    max_particles: 2000
+    min_particles: 500
+    odom_frame: "odom"
+    pf_err: 0.05
+    pf_z: 0.99
+    recovery_alpha_fast: 0.0
+    recovery_alpha_slow: 0.0
+    resample_interval: 1
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    save_pose_rate: 0.5
+    sigma_hit: 0.4
+    tf_broadcast: true
+    transform_tolerance: 0.5
+    update_min_a: 0.1 # 약 5.7도 회전해야 위치 갱신. (연산량 과부하 막기 위해)
+    update_min_d: 0.03 # 3cm 이동해야 위치 갱신
+    z_hit: 0.5
+    z_max: 0.05
+    z_rand: 0.5
+    z_short: 0.05
+    scan_topic: scan
+    map_topic: map
+    set_initial_pose: true
+    always_reset_initial_pose: true
+    first_map_only: false
+    initial_pose:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+      yaw: 0.0
+    initial_pose_covariance_x: 0.08  # cm 오차 허용
+    initial_pose_covariance_y: 0.08
+    initial_pose_covariance_yaw: 0.069 # 약 15도
+
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_tolerance: 0.5
+    filter_duration: 0.3
+    default_nav_to_pose_bt_xml: "/opt/ros/humble/share/nav2_bt_navigator/behavior_trees/navigate_to_pose_w_replanning_and_recovery.xml" # behavior trees location.
+    default_nav_through_poses_bt_xml: "/opt/ros/humble/share/nav2_bt_navigator/behavior_trees/navigate_through_poses_w_replanning_and_recovery.xml"
+    always_reload_bt_xml: false
+    goal_blackboard_id: goal
+    goals_blackboard_id: goals
+    path_blackboard_id: path
+    navigators: ['navigate_to_pose', 'navigate_through_poses']
+    navigate_to_pose:
+      plugin: "nav2_bt_navigator::NavigateToPoseNavigator"
+    navigate_through_poses:
+      plugin: "nav2_bt_navigator::NavigateThroughPosesNavigator"
+    error_code_name_prefixes:
+      - assisted_teleop
+      - backup
+      - compute_path
+      - dock_robot
+      - drive_on_heading
+      - follow_path
+      - nav_thru_poses
+      - nav_to_pose
+      - spin
+      - route
+      - undock_robot
+      - wait
+
+docking_server:
+  ros__parameters:
+    dock_plugins: ['nova_carter_dock']
+    nova_carter_dock:
+      plugin: 'opennav_docking::SimpleChargingDock'
+    docks: ['home_dock','flex_dock1', 'flex_dock2']
+    home_dock:
+      type: 'nova_carter_dock'
+      frame: map
+      pose: [0.0, 0.0, 0.0]
+    flex_dock1:
+      type: 'nova_carter_dock'
+      frame: map
+      pose: [10.0, 10.0, 0.0]
+    flex_dock2:
+      type: 'nova_carter_dock'
+      frame: map
+      pose: [30.0, 30.0, 0.0]
+    enable_stamped_cmd_vel: false
+
+controller_server:  # TurtleBot3 Waffle의 실제 모터 스펙상 최대 선속도는 약 0.26 m/s, 최대 각속도는 약 1.82 rad/s 이다.
+  ros__parameters:
+    controller_frequency: 10.0 # 초당 몇 번 속도를 재계산하는지
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.001
+    min_theta_velocity_threshold: 0.001
+    failure_tolerance: 1.2
+    progress_checker_plugins: ["progress_checker"]
+    goal_checker_plugins: ["goal_checker"]
+    controller_plugins: ["FollowPath"]
+    progress_checker:
+      plugin: "nav2_controller::SimpleProgressChecker"
+      required_movement_radius: 0.1
+      movement_time_allowance: 15.0
+    goal_checker:
+      stateful: true
+      plugin: "nav2_controller::SimpleGoalChecker"
+      xy_goal_tolerance: 0.06 # 웨이포인트 도착 시 위치 오차 허용
+      yaw_goal_tolerance: 3.14 # 방향 오차는 완전 허용을 위함.
+    FollowPath:
+      plugin: "nav2_rotation_shim_controller::RotationShimController"
+      primary_controller: "dwb_core::DWBLocalPlanner"
+      angular_dist_threshold: 0.780 # 목표 방향과 현재 방향의 차이가 45도 이상이면 주행 멈추고 제자리 회전 시작.
+      max_angular_vel: 0.3 # 그때의 회전 속도
+      debug_trajectory_details: true
+      min_vel_x: 0.0      
+      min_vel_y: 0.0
+      max_vel_x: 0.16      # 전진 최대 속도 (m/s)
+      max_vel_y: 0.0
+      max_vel_theta: 0.3  # 회전 최대 속도 (rad/s)
+      min_speed_xy: 0.0
+      max_speed_xy: 0.16   # 평면상 최대 속도 (max_vel_x와 사실상 동일 역할)
+      min_speed_theta: 0.0
+      # Add high threshold velocity for turtlebot 3 issue.
+      # https://github.com/ROBOTIS-GIT/turtlebot3_simulations/issues/75
+      acc_lim_x: 2.5      # 가속 한계
+      acc_lim_y: 0.0
+      acc_lim_theta: 1.5
+      decel_lim_x: -2.0   # 감속 한계
+      decel_lim_y: 0.0
+      decel_lim_theta: -3.2
+      vx_samples: 20      # 속도 후보 샘플링 개수 (많을수록 정밀하지만 연산량↑)
+      vy_samples: 0
+      vtheta_samples: 20
+      sim_time: 1.0       # 궤적 시뮬레이션 시간 (길수록 더 먼 미래까지 보고 속도 선택)
+      linear_granularity: 0.05 # 가상으로 그려본 궤적이 장애물과 부딪히는지(Collision Check) 검사하기 위해 궤적을 몇 미터/라디안 단위로 촘촘하게 쪼개서 볼 것인지 결정. 값을 낮추면(촘촘하게 하면) 매우 얇은 장애물도 정확히 회피하지만, CPU 연산량이 기하급수적으로 폭발함. 높이면 연산은 빠르나 얇은 기둥 등을 통과 가능하다고 오판하여 충돌할 수 있음.
+      angular_granularity: 0.025
+      transform_tolerance: 0.2 # 센서 데이터(LiDAR)와 맵 간의 좌표계 변환(TF) 시, 네트워크나 CPU 지연으로 인해 과거 데이터가 들어와도 수용하는 시간(초)
+      xy_goal_tolerance: 0.06
+      trans_stopped_velocity: 0.005 # 로봇이 물리적으로 "완전히 정지했다"고 판단하는 속도 기준. 값을 너무 높이면 미끄러지며 덜 멈춘 상태에서도 정지했다고 오판하고 다음 명령(회전 등)을 내림.
+      theta_stopped_velocity: 0.008
+      short_circuit_trajectory_evaluation: true # 무수히 많은 가상 궤적을 평가하던 중, '만점'에 가까운 최고 점수의 궤적을 찾으면 나머지 궤적 평가는 중단하고 즉시 실행.
+      stateful: true
+      critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
+      BaseObstacle.scale: 0.1 # 장애물 회피 중요도. 높이면 좁은 복도에서 주행을 거부하거나 장애물을 멀리 빙 돌아서 감. 낮추면 장애물에 스치듯 아슬아슬하게 주행.
+      PathAlign.scale: 8.0 # 로봇의 머리(방향)가 글로벌 경로(Path) 및 최종 목표(Goal) 방향과 얼마나 일치하는지.높이면 자동차처럼 경로를 따라 부드럽게 앞을 보며 주행함.
+      PathAlign.forward_point_distance: 0.1
+      GoalAlign.scale: 5.0
+      GoalAlign.forward_point_distance: 0.1
+      PathDist.scale: 15.0 # 로봇의 위치가 글로벌 경로와 물리적으로 얼마나 가까운가.높이면 중앙선(글로벌 경로)을 칼같이 지키며 주행, 낮추면 장애물을 피해 융통성 있게 지름길(Short-cut)을 개척.
+      GoalDist.scale: 15.0 # 로봇의 위치가 글로벌 목표와 물리적으로 얼마나 가까운가.
+      RotateToGoal.scale: 30.0
+      RotateToGoal.slowing_factor: 5.0
+      RotateToGoal.lookahead_time: -1.0
+    enable_stamped_cmd_vel: false
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      global_frame: odom
+      robot_base_frame: base_footprint
+      rolling_window: true
+      width: 8
+      height: 8
+      resolution: 0.05
+      robot_radius: 0.15
+      plugins: ["obstacle_layer", "inflation_layer"]
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.25
+        cost_scaling_factor: 15.0
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        combination_method: 1
+        raytrace_max_range: 3.0
+        raytrace_range: 3.0
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          min_obstacle_height: -1.0
+          clearing: True
+          marking: True
+          raytrace_min_range: 0.14  # xx 이내 공간은 센서가 inf를 뱉어도 지우지 않음
+          obstacle_min_range: 0.25
+          data_type: "LaserScan"
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      always_send_full_costmap: true
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      global_frame: map
+      robot_base_frame: base_footprint
+      transform_tolerance: 0.5
+      robot_radius: 0.15
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: scan
+        scan:
+          topic: /scan
+          max_obstacle_height: 2.0
+          min_obstacle_height: 0.05
+          clearing: true
+          marking: true
+          data_type: "LaserScan"
+          raytrace_max_range: 4.5
+          raytrace_min_range: 0.12
+          obstacle_max_range: 4.0
+          obstacle_min_range: 0.15
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+        transform_tolerance: 0.1
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.5
+        cost_scaling_factor: 14.5
+      always_send_full_costmap: true
+
+map_server:
+  ros__parameters:
+    mode: "scale"
+    topic_name: "map"
+    frame_id: "map"
+    yaml_filename: "/home/waffle/ros2_ws/src/dae_coverage_floor_flatness/data/map_from_dae.yaml"
+    
+map_saver:
+  ros__parameters:
+    save_map_timeout: 5.0
+    free_thresh_default: 0.25
+    occupied_thresh_default: 0.65
+    map_subscribe_transient_local: true
+
+planner_server:
+  ros__parameters:
+    expected_planner_frequency: 1.0
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_navfn_planner/NavfnPlanner"
+      tolerance: 0.1
+      use_astar: true
+      allow_unknown: true
+
+behavior_server:  # 경로 추종과는 별개로, Nav2가 막혔을 때 복구 행동을 수행할 때의 속도 설정.
+  ros__parameters:
+    local_costmap_topic: local_costmap/costmap_raw
+    local_footprint_topic: local_costmap/published_footprint
+    global_costmap_topic: global_costmap/costmap_raw
+    global_footprint_topic: global_costmap/published_footprint
+    cycle_frequency: 10.0
+    behavior_plugins: ["spin", "backup", "drive_on_heading", "wait", "assisted_teleop"]
+    spin:
+      plugin: "nav2_behaviors/Spin" # In Iron and older versions, "/" was used instead of "::"
+      time_allowance: 20.0
+    backup:
+      plugin: "nav2_behaviors/BackUp" # In Iron and older versions, "/" was used instead of "::"
+    drive_on_heading:
+      plugin: "nav2_behaviors/DriveOnHeading" # In Iron and older versions, "/" was used instead of "::"
+    wait:
+      plugin: "nav2_behaviors/Wait" # In Iron and older versions, "/" was used instead of "::"
+    assisted_teleop:
+      plugin: "nav2_behaviors/AssistedTeleop" # In Iron and older versions, "/" was used instead of "::"
+    local_frame: odom
+    global_frame: map
+    robot_base_frame: base_footprint
+    transform_timeout: 0.1
+    simulate_ahead_time: 2.0
+    max_rotational_vel: 1.0
+    min_rotational_vel: 0.4
+    rotational_acc_lim: 3.2
+    enable_stamped_cmd_vel: false
+
+waypoint_follower:
+  ros__parameters:
+    loop_rate: 10
+    stop_on_failure: false
+    waypoint_task_executor_plugin: "wait_at_waypoint"
+    wait_at_waypoint:
+      plugin: "nav2_waypoint_follower::WaitAtWaypoint"
+      enabled: true
+      waypoint_pause_duration: 200
+
+collision_monitor: # 장애물 접근 시 실시간 감속. path planning과 무관
+  ros__parameters:
+    base_frame_id: "base_footprint"
+    odom_frame_id: "odom"
+    cmd_vel_in_topic: "cmd_vel_smoothed"
+    cmd_vel_out_topic: "cmd_vel"
+    state_topic: "collision_monitor_state"
+    transform_tolerance: 0.5
+    source_timeout: 5.0
+    base_shift_correction: true
+    stop_pub_timeout: 2.0
+    enable_stamped_cmd_vel: false
+    use_realtime_priority: false
+    polygons: ["PolygonStop", "PolygonSlow", "PolygonLimit", "FootprintApproach"]
+    PolygonStop:
+      type: "circle"
+      radius: 0.20    # 이 반경 안에 장애물이 들어오면 완전 정지
+      action_type: "stop"
+      min_points: 4
+      visualize: true
+      polygon_pub_topic: "polygon_stop"
+      enabled: true
+    PolygonSlow:
+      type: "polygon"
+      points: "[[0.4, 0.2], [0.4, -0.2], [-0.2, -0.2], [-0.2, 0.2]]"
+      action_type: "slowdown"
+      min_points: 4
+      slowdown_ratio: 0.3   # 감속 구간 진입 시 속도를 30%로 줄임
+      visualize: true
+      polygon_pub_topic: "polygon_slowdown"
+      enabled: true
+    PolygonLimit:
+      type: "polygon"
+      points: "[[0.3, 0.2], [0.3, -0.2], [-0.2, -0.2], [-0.2, 0.2]]"
+      action_type: "limit"
+      min_points: 4
+      linear_limit: 0.4     # 이 구간에서 선속도 상한 (m/s)
+      angular_limit: 0.5    # 이 구간에서 각속도 상한 (rad/s)
+      visualize: true
+      polygon_pub_topic: "polygon_limit"
+      enabled: true
+    FootprintApproach:
+      type: "polygon"
+      action_type: "approach"
+      footprint_topic: "/local_costmap/published_footprint"
+      time_before_collision: 2.0
+      simulation_time_step: 0.02
+      min_points: 6
+      visualize: False
+      enabled: true
+    VelocityPolygonStop:
+      type: "velocity_polygon"
+      action_type: "stop"
+      min_points: 6
+      visualize: true
+      enabled: False
+      polygon_pub_topic: "velocity_polygon_stop"
+      velocity_polygons: ["rotation", "translation_forward", "translation_backward", "stopped"]
+      holonomic: false
+      rotation:
+        points: "[[0.3, 0.3], [0.3, -0.3], [-0.3, -0.3], [-0.3, 0.3]]"
+        linear_min: 0.0
+        linear_max: 0.05
+        theta_min: -1.0
+        theta_max: 1.0
+      translation_forward:
+        points: "[[0.35, 0.3], [0.35, -0.3], [-0.2, -0.3], [-0.2, 0.3]]"
+        linear_min: 0.0
+        linear_max: 1.0
+        theta_min: -1.0
+        theta_max: 1.0
+      translation_backward:
+        points: "[[0.2, 0.3], [0.2, -0.3], [-0.35, -0.3], [-0.35, 0.3]]"
+        linear_min: -1.0
+        linear_max: 0.0
+        theta_min: -1.0
+        theta_max: 1.0
+      stopped:
+        points: "[[0.25, 0.25], [0.25, -0.25], [-0.25, -0.25], [-0.25, 0.25]]"
+        linear_min: -1.0
+        linear_max: 1.0
+        theta_min: -1.0
+        theta_max: 1.0
+    observation_sources: ["scan"]
+    scan:
+      source_timeout: 0.2
+      type: "scan"
+      topic: "/scan"
+      enabled: true
+
+velocity_smoother: # controller_server가 계산한 속도(cmd_vel)를 받아 한 번 더 제한하고 부드럽게 다듬음.
+  ros__parameters:
+    smoothing_frequency: 10.0
+    scale_velocities: false
+    feedback: "OPEN_LOOP"
+    max_velocity: [0.26, 0.0, 2.5]
+    min_velocity: [-0.5, 0.0, -2.5]
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+    max_accel: [2.5, 0.0, 3.2]
+    max_decel: [-2.5, 0.0, -3.2]
+    odom_topic: "odom"
+    odom_duration: 0.1
+    use_realtime_priority: false
+    enable_stamped_cmd_vel: false

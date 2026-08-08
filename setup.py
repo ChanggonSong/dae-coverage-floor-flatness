@@ -1,21 +1,28 @@
 from setuptools import setup, find_packages
 import glob
+import os
 
 package_name = 'dae_coverage_floor_flatness'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='0.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         # Launch files
-        ('share/' + package_name + '/launch', glob.glob('launch/*.launch.py')),
+        (os.path.join('share', package_name, 'launch'), glob.glob('launch/*.launch.py')),
         # Config files(params.yaml 등) 관리
         # 참고로 Input/Output files(맵, 경로 파일 등)는 사용자 홈 디렉토리의 외부 저장소(~/dae_floor_maps)에서 관리하므로 패키지에는 포함하지 않음
-        ('share/' + package_name + '/config', glob.glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'config'), glob.glob('config/*.yaml')),
+        # rviz files
+        (os.path.join('share', package_name, 'rviz'), glob.glob('rviz/*.rviz')),
+        # urdf files
+        (os.path.join('share', package_name, 'urdf'), glob.glob('urdf/*')),
+        # world files
+        (os.path.join('share', package_name, 'worlds'), glob.glob('worlds/*.world')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
